@@ -160,7 +160,12 @@ class AcousticHarness:
                 termination_reason = "no_action"
                 break
 
+            # Append the assistant message with ALL tool calls at once (required by OpenAI/Anthropic)
+            history.append({"role": "assistant", "tool_calls": tool_calls})
+
             session_done = False
+            tool_results: list[dict] = []
+
             for tc in tool_calls:
                 tool_name: str = tc.get("name", "")
                 tool_args: dict = tc.get("arguments", {})
@@ -205,13 +210,14 @@ class AcousticHarness:
                     "elapsed_sec": round(time.monotonic() - t_start, 2),
                 })
 
-                # Append to conversation history
-                history.append({"role": "assistant", "tool_calls": [tc]})
-                history.append({
+                tool_results.append({
                     "role": "tool",
                     "tool_call_id": tc_id,
                     "content": json.dumps(res),
                 })
+
+            # Append all tool result messages after processing the full batch
+            history.extend(tool_results)
 
             if session_done:
                 break

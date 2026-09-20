@@ -203,8 +203,7 @@ class AudioEngine:
         rms_val = float(np.sqrt(np.mean(sig ** 2))) + 1e-9
         rms_db = float(round(20.0 * np.log10(rms_val), 1))
 
-        std_val = float(np.std(sig)) + 1e-9
-        crest_factor = float(np.max(np.abs(sig))) / std_val
+        crest_factor = float(np.max(np.abs(sig))) / rms_val
         transients_detected = bool(crest_factor > 4.5)
 
         # --- Low-frequency energy ratio (below 200 Hz – engine/road noise proxy) ---
