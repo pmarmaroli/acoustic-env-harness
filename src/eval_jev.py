@@ -87,11 +87,7 @@ def build_feature_matrix(
     label_encoder : LabelEncoder
     """
     if feature_keys is None:
-        seen: dict[str, None] = {}
-        for rec in records:
-            for k in rec["features"]:
-                seen[k] = None
-        feature_keys = list(seen.keys())
+        feature_keys = list(dict.fromkeys(k for rec in records for k in rec["features"]))
 
     rows, labels = [], []
     for rec in records:

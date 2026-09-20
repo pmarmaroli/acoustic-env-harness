@@ -106,9 +106,10 @@ class SessionResult(BaseModel):
 class AcousticHarness:
     """Orchestrate a bounded 60-second acoustic exploration session for one LLM."""
 
-    def __init__(self, model_name: str, runs_dir: str = "runs") -> None:
+    def __init__(self, model_name: str, runs_dir: str = "runs", budget_sec: float = BUDGET_SEC) -> None:
         self.model_name = model_name
         self.runs_dir = runs_dir
+        self.budget_sec = budget_sec
         self.audio = AudioEngine()
         os.makedirs(self.runs_dir, exist_ok=True)
 
@@ -142,7 +143,7 @@ class AcousticHarness:
         termination_reason = "in_progress"
 
         while True:
-            remaining = max(0.0, BUDGET_SEC - (time.monotonic() - t_start))
+            remaining = max(0.0, self.budget_sec - (time.monotonic() - t_start))
             if remaining <= 0.5:
                 termination_reason = "timeout"
                 break
@@ -172,19 +173,27 @@ class AcousticHarness:
                 tc_id: str = tc.get("id", tool_name)
 
                 if tool_name == "submit_jev_features":
-                    # Terminal tool – end session immediately
+                    # Terminal tool – record a synthetic tool result to keep history consistent,
+                    # then end the session immediately.
                     final_features = tool_args.get("features", {})
                     termination_reason = "completed"
+                    submit_result = {"status": "accepted", "elapsed_sec": round(time.monotonic() - t_start, 2)}
                     trace.append({
                         "tool": tool_name,
                         "args": tool_args,
-                        "elapsed_sec": round(time.monotonic() - t_start, 2),
+                        "result": submit_result,
+                        "elapsed_sec": submit_result["elapsed_sec"],
+                    })
+                    tool_results.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": json.dumps(submit_result),
                     })
                     session_done = True
                     break
 
                 # --- Dispatch audio tools ---
-                remaining_before = max(0.0, BUDGET_SEC - (time.monotonic() - t_start))
+                remaining_before = max(0.0, self.budget_sec - (time.monotonic() - t_start))
 
                 if tool_name == "measure_ir":
                     duration = min(float(tool_args.get("duration_sec", 2.0)), remaining_before)
@@ -200,7 +209,7 @@ class AcousticHarness:
                     res = {"error": f"Unknown tool: {tool_name}"}
 
                 # Inject remaining budget after the call completes
-                remaining_after = max(0.0, BUDGET_SEC - (time.monotonic() - t_start))
+                remaining_after = max(0.0, self.budget_sec - (time.monotonic() - t_start))
                 res["remaining_budget_sec"] = round(remaining_after, 2)
 
                 trace.append({
@@ -224,7 +233,7 @@ class AcousticHarness:
 
         # --- Finalise ---
         total_elapsed = round(time.monotonic() - t_start, 2)
-        if final_features is None and total_elapsed >= BUDGET_SEC:
+        if final_features is None and total_elapsed >= self.budget_sec:
             termination_reason = "timeout"
 
         result = SessionResult(

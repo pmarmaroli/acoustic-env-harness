@@ -230,11 +230,6 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     args = _build_parser().parse_args(argv)
 
-    # Override budget if custom value supplied
-    if args.budget != 60.0:
-        import src.harness as _harness_mod  # noqa: PLC0415
-        _harness_mod.BUDGET_SEC = args.budget
-
     from src.harness import AcousticHarness  # noqa: PLC0415
 
     # Build LLM function
@@ -245,7 +240,7 @@ def main(argv: list[str] | None = None) -> None:
     else:
         llm_fn = _make_stub_llm()
 
-    harness = AcousticHarness(model_name=args.model, runs_dir=args.runs_dir)
+    harness = AcousticHarness(model_name=args.model, runs_dir=args.runs_dir, budget_sec=args.budget)
 
     print(f"[run_session] Starting session – model={args.model}, provider={args.provider}, budget={args.budget}s")
     t0 = time.monotonic()

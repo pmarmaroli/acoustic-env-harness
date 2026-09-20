@@ -132,9 +132,11 @@ class AudioEngine:
                 tau = (int(peaks[0]) + min_lag) / sr
                 comb_notch_hz = int(round(1.0 / (2.0 * tau)))
 
-        # --- Peak SNR ---
-        noise_floor_db = float(np.median(energy_db[-max(1, int(0.1 * sr)) :]))
-        snr_db = float(round(float(np.max(energy_db)) - noise_floor_db, 1))
+        # --- Peak SNR (pre-stimulus noise floor from first 50 ms of recording) ---
+        pre_samples = max(1, int(0.05 * sr))
+        noise_rms = float(np.sqrt(np.mean(sig[:pre_samples] ** 2))) + 1e-9
+        signal_rms = float(np.sqrt(np.mean(ir ** 2))) + 1e-9
+        snr_db = float(round(20.0 * np.log10(signal_rms / noise_rms), 1))
 
         return {
             "t60_est_sec": t60_est,
