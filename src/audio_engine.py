@@ -97,8 +97,16 @@ class AudioEngine:
                 "error": str(exc),
             }
 
-        # --- Deconvolution by cross-correlation (approximate IR) ---
-        ir = correlate(sig, sweep, mode="full")[len(sweep) - 1 :]
+        # --- True IR extraction via log-sweep inverse filter ---
+        # The inverse filter is the time-reversed sweep weighted by an exponential
+        # amplitude envelope (1/f compensation) so that convolution yields a flat
+        # broadband impulse response rather than a frequency-distorted one.
+        env = np.exp(np.arange(num_samples) * np.log(rate_ratio) / num_samples)
+        inv_filter = sweep[::-1] * env
+        inv_filter /= float(np.max(np.abs(inv_filter))) + 1e-9
+
+        ir_full = np.convolve(sig, inv_filter, mode="full")
+        ir = ir_full[:num_samples]
         max_abs = float(np.max(np.abs(ir))) + 1e-9
         ir = ir / max_abs
 

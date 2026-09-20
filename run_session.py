@@ -23,6 +23,7 @@ Options
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import sys
@@ -86,12 +87,11 @@ def _make_stub_llm() -> Any:
                 "arguments": {"features": _state["observations"]},
             }])
 
-        calls = _sequence[step]
+        calls = copy.deepcopy(_sequence[step])
 
         # On submit step, populate features from accumulated observations
         if step == len(_sequence) - 1:
-            obs = dict(_state["observations"])
-            calls[0]["arguments"]["features"].update(obs)
+            calls[0]["arguments"]["features"].update(_state["observations"])
 
         _state["step"] += 1
         return _StubResponse(calls)

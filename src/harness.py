@@ -233,7 +233,7 @@ class AcousticHarness:
 
         # --- Finalise ---
         total_elapsed = round(time.monotonic() - t_start, 2)
-        if final_features is None and total_elapsed >= self.budget_sec:
+        if total_elapsed >= self.budget_sec and termination_reason != "completed":
             termination_reason = "timeout"
 
         result = SessionResult(

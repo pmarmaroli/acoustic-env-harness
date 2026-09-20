@@ -146,7 +146,9 @@ def evaluate_classifier(
         clf = RandomForestClassifier(n_estimators=200, random_state=42)
 
     scaler = StandardScaler()
-    skf = StratifiedKFold(n_splits=min(n_splits, len(np.unique(y))), shuffle=True, random_state=42)
+    safe_splits = min(n_splits, int(np.min(np.bincount(y))))
+    safe_splits = max(2, safe_splits)  # StratifiedKFold requires at least 2 splits
+    skf = StratifiedKFold(n_splits=safe_splits, shuffle=True, random_state=42)
 
     all_preds, all_true = [], []
     for train_idx, test_idx in skf.split(X, y):
