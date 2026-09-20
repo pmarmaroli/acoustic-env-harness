@@ -146,8 +146,13 @@ def evaluate_classifier(
         clf = RandomForestClassifier(n_estimators=200, random_state=42)
 
     scaler = StandardScaler()
-    safe_splits = min(n_splits, int(np.min(np.bincount(y))))
-    safe_splits = max(2, safe_splits)  # StratifiedKFold requires at least 2 splits
+    min_class_count = int(np.min(np.bincount(y)))
+    if min_class_count < 2:
+        raise ValueError(
+            f"The smallest class has only {min_class_count} sample(s). "
+            "Need at least 2 samples per class for cross-validation."
+        )
+    safe_splits = max(2, min(n_splits, min_class_count))
     skf = StratifiedKFold(n_splits=safe_splits, shuffle=True, random_state=42)
 
     all_preds, all_true = [], []

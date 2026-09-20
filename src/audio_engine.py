@@ -63,11 +63,11 @@ class AudioEngine:
 
         # --- Logarithmic sine sweep synthesis ---
         rate_ratio = f_max / f_min
-        sweep = np.sin(
+        raw_sweep = np.sin(
             2.0 * np.pi * f_min * (rate_ratio ** (t / duration_sec) - 1.0) / np.log(rate_ratio)
         )
-        # Hann window + conservative amplitude to avoid transducer clipping
-        sweep = sweep * 0.25 * np.hanning(num_samples)
+        # Hann-windowed sweep for playback (conservative amplitude to avoid clipping)
+        sweep = raw_sweep * 0.25 * np.hanning(num_samples)
 
         # --- Synchronous playback + recording (mono) ---
         if not _SD_AVAILABLE:
@@ -98,15 +98,17 @@ class AudioEngine:
             }
 
         # --- True IR extraction via log-sweep inverse filter ---
-        # The inverse filter is the time-reversed sweep weighted by an exponential
-        # amplitude envelope (1/f compensation) so that convolution yields a flat
-        # broadband impulse response rather than a frequency-distorted one.
+        # Build the inverse filter from the *un-windowed* raw sweep so the
+        # deconvolution is not distorted by the Hann envelope applied at playback.
+        # The exponential amplitude ramp compensates for the 1/f energy distribution
+        # of the log sweep, yielding a spectrally flat broadband impulse response.
         env = np.exp(np.arange(num_samples) * np.log(rate_ratio) / num_samples)
-        inv_filter = sweep[::-1] * env
+        inv_filter = raw_sweep[::-1] * env
         inv_filter /= float(np.max(np.abs(inv_filter))) + 1e-9
 
+        # The causal IR lives in the second half of the full convolution output
         ir_full = np.convolve(sig, inv_filter, mode="full")
-        ir = ir_full[:num_samples]
+        ir = ir_full[num_samples - 1 : 2 * num_samples - 1]
         max_abs = float(np.max(np.abs(ir))) + 1e-9
         ir = ir / max_abs
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from pydantic import BaseModel, Field
@@ -238,7 +238,7 @@ class AcousticHarness:
 
         result = SessionResult(
             model_name=self.model_name,
-            timestamp=datetime.now().isoformat(),
+            timestamp=datetime.now(tz=timezone.utc).isoformat(),
             total_elapsed_sec=total_elapsed,
             termination_reason=termination_reason,
             final_features=final_features,
