@@ -45,6 +45,13 @@ class AudioEngine:
         duration_sec : float
             Sweep duration in seconds (clamped to ≥ 0.5 s).
 
+        Notes
+        -----
+        The recording window equals ``duration_sec``.  When the room's
+        reverberation time (T60) exceeds the sweep duration, the extracted IR
+        will be truncated and T60 estimation will be unreliable.  For reverberant
+        environments use a longer sweep (e.g. ``duration_sec=3.0`` or more).
+
         Returns
         -------
         dict with keys:
@@ -135,12 +142,12 @@ class AudioEngine:
         max_lag = int(0.005 * sr)             # ~5.0 ms   → ~1.7 m path difference
         search_region = autocorr[min_lag : max_lag + 1]
 
-        comb_notch_hz: int | None = None
+        comb_filter_notch_hz: int | None = None
         if len(search_region) > 0:
             peaks, _ = find_peaks(search_region, distance=max(1, int(0.0002 * sr)))
             if len(peaks) > 0:
                 tau = (int(peaks[0]) + min_lag) / sr
-                comb_notch_hz = int(round(1.0 / (2.0 * tau)))
+                comb_filter_notch_hz = int(round(1.0 / (2.0 * tau)))
 
         # --- Peak SNR (pre-stimulus noise floor from first 50 ms of recording) ---
         pre_samples = max(1, int(0.05 * sr))
@@ -150,7 +157,7 @@ class AudioEngine:
 
         return {
             "t60_est_sec": t60_est,
-            "comb_filter_notch_hz": comb_notch_hz,
+            "comb_filter_notch_hz": comb_filter_notch_hz,
             "snr_peak_db": snr_db,
             "duration_measured_sec": round(duration_sec, 2),
         }

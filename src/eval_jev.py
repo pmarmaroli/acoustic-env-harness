@@ -264,7 +264,11 @@ def evaluate_all_models(
             continue
 
         X, y, feature_keys, le = build_feature_matrix(model_records)
-        metrics = evaluate_classifier(X, y, le, classifier=classifier, n_splits=n_splits)
+        try:
+            metrics = evaluate_classifier(X, y, le, classifier=classifier, n_splits=n_splits)
+        except ValueError as exc:
+            print(f"[eval_jev] Skipping '{model_name}': {exc}")
+            continue
         results[model_name] = metrics
 
         print(f"\n{'=' * 60}")
