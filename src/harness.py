@@ -18,6 +18,8 @@ import time
 from datetime import datetime
 from typing import Any, Callable
 
+from pydantic import BaseModel, Field
+
 from src.audio_engine import AudioEngine
 
 BUDGET_SEC: float = 60.0
@@ -88,6 +90,17 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
 ]
+
+
+class SessionResult(BaseModel):
+    """Validated session result payload."""
+
+    model_name: str
+    timestamp: str
+    total_elapsed_sec: float
+    termination_reason: str
+    final_features: dict[str, Any] | None = Field(default=None)
+    trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AcousticHarness:
@@ -208,24 +221,24 @@ class AcousticHarness:
         if final_features is None and total_elapsed >= BUDGET_SEC:
             termination_reason = "timeout"
 
-        payload = {
-            "model_name": self.model_name,
-            "timestamp": datetime.now().isoformat(),
-            "total_elapsed_sec": total_elapsed,
-            "termination_reason": termination_reason,
-            "final_features": final_features,
-            "trace": trace,
-        }
+        result = SessionResult(
+            model_name=self.model_name,
+            timestamp=datetime.now().isoformat(),
+            total_elapsed_sec=total_elapsed,
+            termination_reason=termination_reason,
+            final_features=final_features,
+            trace=trace,
+        )
 
-        self._save(payload)
-        return payload
+        self._save(result)
+        return result.model_dump()
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
-    def _save(self, payload: dict) -> None:
+    def _save(self, result: SessionResult) -> None:
         filename = f"{self.model_name}_{int(time.time())}.json"
         filepath = os.path.join(self.runs_dir, filename)
         with open(filepath, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2, ensure_ascii=False)
+            json.dump(result.model_dump(), fh, indent=2, ensure_ascii=False)

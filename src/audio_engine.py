@@ -13,7 +13,7 @@ from scipy.signal import correlate, find_peaks, welch
 try:
     import sounddevice as sd  # type: ignore[import]
     _SD_AVAILABLE = True
-except OSError:
+except (OSError, ImportError):
     sd = None  # type: ignore[assignment]
     _SD_AVAILABLE = False
 

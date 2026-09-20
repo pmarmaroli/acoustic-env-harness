@@ -40,7 +40,6 @@ class _StubResponse:
     def __init__(self, tool_calls: list[dict]) -> None:
         self.tool_calls = tool_calls
 
-
 def _make_stub_llm() -> Any:
     """Return a stub LLM function that cycles through a fixed call sequence."""
     _sequence = [
@@ -110,7 +109,10 @@ def _make_openai_llm(model_name: str) -> Any:
     except ImportError:
         sys.exit("[run_session] openai package not installed. Run: pip install openai")
 
-    client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        sys.exit("[run_session] OPENAI_API_KEY environment variable is not set.")
+    client = openai.OpenAI(api_key=api_key)
 
     from src.harness import TOOL_DEFINITIONS  # noqa: PLC0415
 
@@ -129,14 +131,16 @@ def _make_openai_llm(model_name: str) -> Any:
         msg = response.choices[0].message
 
         class _Resp:
-            tool_calls = None
+            def __init__(self) -> None:
+                self.tool_calls = None
 
+        resp = _Resp()
         if msg.tool_calls:
-            _Resp.tool_calls = [
+            resp.tool_calls = [
                 {"id": tc.id, "name": tc.function.name, "arguments": json.loads(tc.function.arguments)}
                 for tc in msg.tool_calls
             ]
-        return _Resp()
+        return resp
 
     return chat
 
@@ -151,7 +155,10 @@ def _make_anthropic_llm(model_name: str) -> Any:
     except ImportError:
         sys.exit("[run_session] anthropic package not installed. Run: pip install anthropic")
 
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        sys.exit("[run_session] ANTHROPIC_API_KEY environment variable is not set.")
+    client = anthropic.Anthropic(api_key=api_key)
 
     from src.harness import TOOL_DEFINITIONS  # noqa: PLC0415
 
@@ -183,15 +190,17 @@ def _make_anthropic_llm(model_name: str) -> Any:
         )
 
         class _Resp:
-            tool_calls = None
+            def __init__(self) -> None:
+                self.tool_calls = None
 
+        resp = _Resp()
         tcs = [b for b in response.content if b.type == "tool_use"]
         if tcs:
-            _Resp.tool_calls = [
+            resp.tool_calls = [
                 {"id": tc.id, "name": tc.name, "arguments": tc.input}
                 for tc in tcs
             ]
-        return _Resp()
+        return resp
 
     return chat
 
