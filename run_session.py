@@ -331,7 +331,9 @@ def main(argv: list[str] | None = None) -> None:
     from src.jev_client import JevClient  # noqa: PLC0415
 
     jev_url = _validate_http_url("--jev-url", args.jev_url)
-    ollama_url = _validate_http_url("--ollama-url", args.ollama_url) if args.provider == "ollama" else args.ollama_url
+    ollama_url: str | None = None
+    if args.provider == "ollama":
+        ollama_url = _validate_http_url("--ollama-url", args.ollama_url)
 
     # Build LLM function
     if args.provider == "openai":
@@ -339,6 +341,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.provider == "anthropic":
         llm_fn = _make_anthropic_llm(args.model)
     elif args.provider == "ollama":
+        assert ollama_url is not None
         llm_fn = _make_ollama_llm(args.model, ollama_url)
     else:
         llm_fn = _make_stub_llm()
@@ -365,10 +368,12 @@ def main(argv: list[str] | None = None) -> None:
 
     # Save path is logged for convenience
     runs_dir = args.runs_dir
-    candidates = sorted(
-        (f for f in os.listdir(runs_dir) if f.startswith(args.model) and f.endswith(".json")),
-        reverse=True,
-    )
+    candidates: list[str] = []
+    if os.path.isdir(runs_dir):
+        candidates = sorted(
+            (f for f in os.listdir(runs_dir) if f.startswith(args.model) and f.endswith(".json")),
+            reverse=True,
+        )
     if candidates:
         print(f"  Saved to    : {os.path.join(runs_dir, candidates[0])}")
 
