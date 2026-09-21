@@ -369,16 +369,8 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  Features    : {json.dumps(result['final_features'], indent=2)}")
     print(f"  Jev         : {json.dumps(result['jev_response'], indent=2)}")
 
-    # Save path is logged for convenience
-    runs_dir = args.runs_dir
-    candidates: list[str] = []
-    if os.path.isdir(runs_dir):
-        candidates = sorted(
-            (f for f in os.listdir(runs_dir) if f.startswith(args.model) and f.endswith(".json")),
-            reverse=True,
-        )
-    if candidates:
-        print(f"  Saved to    : {os.path.join(runs_dir, candidates[0])}")
+    if result.get("saved_path"):
+        print(f"  Saved to    : {result['saved_path']}")
 
 
 if __name__ == "__main__":

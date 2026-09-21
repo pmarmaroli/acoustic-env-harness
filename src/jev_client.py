@@ -56,11 +56,10 @@ class JevClient:
                     body = response.json()
                     return JevPredictionResponse.model_validate(body).model_dump()
                 except httpx.ConnectError as exc:
-                    last_error = (
+                    raise JevClientError(
                         f"Could not connect to Jev API at {self.base_url}. "
                         f"Verify that the service is running and that --jev-url is correct. ({exc})"
-                    )
-                    continue
+                    ) from exc
                 except httpx.TimeoutException as exc:
                     raise JevClientError(
                         f"Timed out while contacting Jev API at {self.base_url}{endpoint_path}."
