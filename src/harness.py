@@ -21,7 +21,7 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field
 
 from src.audio_engine import AudioEngine
-from src.jev_client import JevClient, JevClientError
+from src.jev_client import JevClient
 
 BUDGET_SEC: float = 60.0
 
@@ -187,14 +187,14 @@ class AcousticHarness:
                     # then end the session immediately.
                     final_features = tool_args.get("features", {})
                     try:
-                        jev_response = self.submit_jev_features(final_features)
+                        jev_response = self.jev_client.submit_features(final_features)
                         termination_reason = "completed"
                         submit_result = {
                             "status": "accepted",
                             "jev_response": jev_response,
                             "elapsed_sec": round(time.monotonic() - t_start, 2),
                         }
-                    except JevClientError as exc:
+                    except Exception as exc:  # noqa: BLE001
                         termination_reason = "jev_error"
                         submit_result = {
                             "status": "error",
@@ -279,7 +279,3 @@ class AcousticHarness:
         filepath = os.path.join(self.runs_dir, filename)
         with open(filepath, "w", encoding="utf-8") as fh:
             json.dump(result.model_dump(), fh, indent=2, ensure_ascii=False)
-
-    def submit_jev_features(self, features: dict[str, Any]) -> dict[str, Any]:
-        """Submit the final acoustic feature vector to the Jev API."""
-        return self.jev_client.submit_features(features)

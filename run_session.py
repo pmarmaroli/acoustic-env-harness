@@ -210,10 +210,14 @@ def _make_ollama_llm(model_name: str, base_url: str) -> Any:
                 }
                 for tc in (message.get("tool_calls") or [])
             ]
-        except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError):
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"[run_session] Ollama returned malformed tool arguments from {api_url}: {exc}"
+            ) from exc
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise RuntimeError(
                 f"[run_session] Ollama returned an unexpected response format from {api_url}."
-            )
+            ) from exc
 
         class _Resp:
             def __init__(self) -> None:
