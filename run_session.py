@@ -181,19 +181,21 @@ def _make_ollama_llm(model_name: str, base_url: str) -> Any:
             )
             response.raise_for_status()
         except httpx.ConnectError:
-            sys.exit(
+            raise RuntimeError(
                 f"[run_session] Could not connect to Ollama at {base_url}. "
                 "Start Ollama first or override --ollama-url."
             )
         except httpx.TimeoutException:
-            sys.exit(f"[run_session] Timed out while waiting for Ollama at {api_url}.")
+            raise RuntimeError(
+                f"[run_session] Timed out while waiting for Ollama at {api_url}."
+            )
         except httpx.HTTPStatusError as exc:
-            sys.exit(
+            raise RuntimeError(
                 f"[run_session] Ollama request failed with HTTP {exc.response.status_code}: "
                 f"{exc.response.text}"
-            )
+            ) from exc
         except httpx.HTTPError as exc:
-            sys.exit(f"[run_session] Ollama request failed: {exc}")
+            raise RuntimeError(f"[run_session] Ollama request failed: {exc}") from exc
 
         try:
             payload = response.json()
@@ -209,7 +211,7 @@ def _make_ollama_llm(model_name: str, base_url: str) -> Any:
                 for tc in (message.get("tool_calls") or [])
             ]
         except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError):
-            sys.exit(
+            raise RuntimeError(
                 f"[run_session] Ollama returned an unexpected response format from {api_url}."
             )
 
@@ -331,9 +333,6 @@ def main(argv: list[str] | None = None) -> None:
     from src.jev_client import JevClient  # noqa: PLC0415
 
     jev_url = _validate_http_url("--jev-url", args.jev_url)
-    ollama_url: str | None = None
-    if args.provider == "ollama":
-        ollama_url = _validate_http_url("--ollama-url", args.ollama_url)
 
     # Build LLM function
     if args.provider == "openai":
@@ -341,6 +340,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.provider == "anthropic":
         llm_fn = _make_anthropic_llm(args.model)
     elif args.provider == "ollama":
+        ollama_url = _validate_http_url("--ollama-url", args.ollama_url)
         llm_fn = _make_ollama_llm(args.model, ollama_url)
     else:
         llm_fn = _make_stub_llm()
