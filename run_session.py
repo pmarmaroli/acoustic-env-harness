@@ -341,7 +341,8 @@ def main(argv: list[str] | None = None) -> None:
     elif args.provider == "anthropic":
         llm_fn = _make_anthropic_llm(args.model)
     elif args.provider == "ollama":
-        assert ollama_url is not None
+        if ollama_url is None:
+            sys.exit("[run_session] --ollama-url validation did not run as expected.")
         llm_fn = _make_ollama_llm(args.model, ollama_url)
     else:
         llm_fn = _make_stub_llm()

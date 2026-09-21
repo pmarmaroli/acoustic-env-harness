@@ -58,7 +58,7 @@ class JevClient:
                 except httpx.ConnectError as exc:
                     last_error = (
                         f"Could not connect to Jev API at {self.base_url}. "
-                        "Verify that the service is running and that --jev-url is correct."
+                        f"Verify that the service is running and that --jev-url is correct. ({exc})"
                     )
                     continue
                 except httpx.TimeoutException as exc:
