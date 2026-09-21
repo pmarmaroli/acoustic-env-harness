@@ -21,6 +21,7 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field
 
 from src.audio_engine import AudioEngine
+from src.jev_client import JevClient
 
 BUDGET_SEC: float = 60.0
 
@@ -100,17 +101,26 @@ class SessionResult(BaseModel):
     total_elapsed_sec: float
     termination_reason: str
     final_features: dict[str, Any] | None = Field(default=None)
+    jev_response: dict[str, Any] | None = Field(default=None)
+    saved_path: str | None = Field(default=None)
     trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AcousticHarness:
     """Orchestrate a bounded 60-second acoustic exploration session for one LLM."""
 
-    def __init__(self, model_name: str, runs_dir: str = "runs", budget_sec: float = BUDGET_SEC) -> None:
+    def __init__(
+        self,
+        model_name: str,
+        runs_dir: str = "runs",
+        budget_sec: float = BUDGET_SEC,
+        jev_client: JevClient | None = None,
+    ) -> None:
         self.model_name = model_name
         self.runs_dir = runs_dir
         self.budget_sec = budget_sec
         self.audio = AudioEngine()
+        self.jev_client = jev_client or JevClient()
         os.makedirs(self.runs_dir, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -140,6 +150,7 @@ class AcousticHarness:
         trace: list[dict[str, Any]] = []
 
         final_features: dict | None = None
+        jev_response: dict[str, Any] | None = None
         termination_reason = "in_progress"
 
         while True:
@@ -176,8 +187,21 @@ class AcousticHarness:
                     # Terminal tool – record a synthetic tool result to keep history consistent,
                     # then end the session immediately.
                     final_features = tool_args.get("features", {})
-                    termination_reason = "completed"
-                    submit_result = {"status": "accepted", "elapsed_sec": round(time.monotonic() - t_start, 2)}
+                    try:
+                        jev_response = self.jev_client.submit_features(final_features)
+                        termination_reason = "completed"
+                        submit_result = {
+                            "status": "accepted",
+                            "jev_response": jev_response,
+                            "elapsed_sec": round(time.monotonic() - t_start, 2),
+                        }
+                    except Exception as exc:  # noqa: BLE001
+                        termination_reason = "jev_error"
+                        submit_result = {
+                            "status": "error",
+                            "error": str(exc),
+                            "elapsed_sec": round(time.monotonic() - t_start, 2),
+                        }
                     trace.append({
                         "tool": tool_name,
                         "args": tool_args,
@@ -194,6 +218,7 @@ class AcousticHarness:
 
                 # --- Dispatch audio tools ---
                 remaining_before = max(0.0, self.budget_sec - (time.monotonic() - t_start))
+                duration: float | None = None
 
                 if tool_name == "measure_ir":
                     duration = min(float(tool_args.get("duration_sec", 2.0)), remaining_before)
@@ -206,7 +231,13 @@ class AcousticHarness:
                     duration = min(float(tool_args.get("duration_sec", 4.0)), remaining_before)
                     res = self.audio.listen_ambient(duration_sec=duration)
                 else:
-                    res = {"error": f"Unknown tool: {tool_name}"}
+                    trace.append({
+                        "event": "unknown_tool",
+                        "tool": tool_name,
+                        "args": tool_args,
+                        "elapsed_sec": round(time.monotonic() - t_start, 2),
+                    })
+                    res = {"error": f"Unknown tool: {tool_name}", "unknown_tool": tool_name}
 
                 # Inject remaining budget after the call completes
                 remaining_after = max(0.0, self.budget_sec - (time.monotonic() - t_start))
@@ -233,27 +264,30 @@ class AcousticHarness:
 
         # --- Finalise ---
         total_elapsed = round(time.monotonic() - t_start, 2)
-        if total_elapsed >= self.budget_sec and termination_reason != "completed":
-            termination_reason = "timeout"
 
+        saved_path = self._build_save_path()
         result = SessionResult(
             model_name=self.model_name,
             timestamp=datetime.now(tz=timezone.utc).isoformat(),
             total_elapsed_sec=total_elapsed,
             termination_reason=termination_reason,
             final_features=final_features,
+            jev_response=jev_response,
+            saved_path=saved_path,
             trace=trace,
         )
 
-        self._save(result)
+        self._save(result, saved_path)
         return result.model_dump()
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
-    def _save(self, result: SessionResult) -> None:
+    def _build_save_path(self) -> str:
         filename = f"{self.model_name}_{int(time.time())}.json"
-        filepath = os.path.join(self.runs_dir, filename)
+        return os.path.join(self.runs_dir, filename)
+
+    def _save(self, result: SessionResult, filepath: str) -> None:
         with open(filepath, "w", encoding="utf-8") as fh:
             json.dump(result.model_dump(), fh, indent=2, ensure_ascii=False)

@@ -12,12 +12,17 @@ Usage examples
 # Anthropic Claude 3.5 Sonnet (requires ANTHROPIC_API_KEY env var):
     python run_session.py --model claude-3-5-sonnet-20241022 --provider anthropic
 
+# Ollama local model (requires a running Ollama server):
+    python run_session.py --model mistral --provider ollama
+
 Options
 -------
 --model       Model name/identifier passed to the provider.
---provider    LLM provider: 'openai', 'anthropic', or 'stub' (default: stub).
+--provider    LLM provider: 'openai', 'anthropic', 'ollama', or 'stub' (default: stub).
 --runs-dir    Directory to save session JSON files (default: runs).
 --budget      Hard time budget in seconds (default: 60).
+--jev-url     Base URL for the Jev classifier API (default: http://localhost:8000).
+--ollama-url  Base URL for the Ollama API (default: http://localhost:11434).
 """
 
 from __future__ import annotations
@@ -29,6 +34,9 @@ import os
 import sys
 import time
 from typing import Any
+from urllib.parse import urlparse
+
+import httpx
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +154,84 @@ def _make_openai_llm(model_name: str) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# Ollama provider (OpenAI-compatible chat completions API)
+# ---------------------------------------------------------------------------
+
+def _make_ollama_llm(model_name: str, base_url: str) -> Any:
+    from src.harness import TOOL_DEFINITIONS  # noqa: PLC0415
+
+    tools = [
+        {"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["parameters"]}}
+        for t in TOOL_DEFINITIONS
+    ]
+    api_url = f"{base_url.rstrip('/')}/v1/chat/completions"
+
+    def chat(history: list[dict]) -> Any:
+        try:
+            response = httpx.post(
+                api_url,
+                json={
+                    "model": model_name,
+                    "messages": history,
+                    "tools": tools,
+                    "tool_choice": "auto",
+                    "stream": False,
+                },
+                timeout=60.0,
+            )
+            response.raise_for_status()
+        except httpx.ConnectError:
+            raise RuntimeError(
+                f"[run_session] Could not connect to Ollama at {base_url}. "
+                "Start Ollama first or override --ollama-url."
+            )
+        except httpx.TimeoutException:
+            raise RuntimeError(
+                f"[run_session] Timed out while waiting for Ollama at {api_url}."
+            )
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"[run_session] Ollama request failed with HTTP {exc.response.status_code}: "
+                f"{exc.response.text}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"[run_session] Ollama request failed: {exc}") from exc
+
+        try:
+            payload = response.json()
+            message = payload["choices"][0]["message"]
+            parsed_tool_calls = [
+                {
+                    "id": tc.get("id", tc["function"]["name"]),
+                    "name": tc["function"]["name"],
+                    "arguments": json.loads(tc["function"]["arguments"])
+                    if isinstance(tc["function"]["arguments"], str)
+                    else tc["function"]["arguments"],
+                }
+                for tc in (message.get("tool_calls") or [])
+            ]
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"[run_session] Ollama returned malformed tool arguments from {api_url}: {exc}"
+            ) from exc
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"[run_session] Ollama returned an unexpected response format from {api_url}."
+            ) from exc
+
+        class _Resp:
+            def __init__(self) -> None:
+                self.tool_calls = None
+
+        resp = _Resp()
+        if parsed_tool_calls:
+            resp.tool_calls = parsed_tool_calls
+        return resp
+
+    return chat
+
+
+# ---------------------------------------------------------------------------
 # Anthropic provider
 # ---------------------------------------------------------------------------
 
@@ -219,30 +305,61 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--provider",
         default="stub",
-        choices=["stub", "openai", "anthropic"],
+        choices=["stub", "openai", "anthropic", "ollama"],
         help="LLM provider (default: stub).",
     )
     p.add_argument("--runs-dir", default="runs", help="Output directory for session JSON.")
     p.add_argument("--budget", type=float, default=60.0, help="Hard budget in seconds.")
+    p.add_argument(
+        "--jev-url",
+        default="http://localhost:8000",
+        help="Base URL for the Jev classifier API (default: http://localhost:8000).",
+    )
+    p.add_argument(
+        "--ollama-url",
+        default="http://localhost:11434",
+        help="Base URL for the Ollama API (default: http://localhost:11434).",
+    )
     return p
+
+
+def _validate_http_url(name: str, value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        sys.exit(f"[run_session] {name} must be a valid http(s) URL, got: {value!r}")
+    return value.rstrip("/")
 
 
 def main(argv: list[str] | None = None) -> None:
     args = _build_parser().parse_args(argv)
 
     from src.harness import AcousticHarness  # noqa: PLC0415
+    from src.jev_client import JevClient  # noqa: PLC0415
+
+    jev_url = _validate_http_url("--jev-url", args.jev_url)
 
     # Build LLM function
     if args.provider == "openai":
         llm_fn = _make_openai_llm(args.model)
     elif args.provider == "anthropic":
         llm_fn = _make_anthropic_llm(args.model)
+    elif args.provider == "ollama":
+        ollama_url = _validate_http_url("--ollama-url", args.ollama_url)
+        llm_fn = _make_ollama_llm(args.model, ollama_url)
     else:
         llm_fn = _make_stub_llm()
 
-    harness = AcousticHarness(model_name=args.model, runs_dir=args.runs_dir, budget_sec=args.budget)
+    harness = AcousticHarness(
+        model_name=args.model,
+        runs_dir=args.runs_dir,
+        budget_sec=args.budget,
+        jev_client=JevClient(base_url=jev_url),
+    )
 
-    print(f"[run_session] Starting session – model={args.model}, provider={args.provider}, budget={args.budget}s")
+    print(
+        "[run_session] Starting session – "
+        f"model={args.model}, provider={args.provider}, budget={args.budget}s, jev_url={jev_url}"
+    )
     t0 = time.monotonic()
     result = harness.run_session(llm_fn)
     elapsed = time.monotonic() - t0
@@ -250,15 +367,10 @@ def main(argv: list[str] | None = None) -> None:
     print(f"\n[run_session] Session finished in {elapsed:.1f}s")
     print(f"  Termination : {result['termination_reason']}")
     print(f"  Features    : {json.dumps(result['final_features'], indent=2)}")
+    print(f"  Jev         : {json.dumps(result['jev_response'], indent=2)}")
 
-    # Save path is logged for convenience
-    runs_dir = args.runs_dir
-    candidates = sorted(
-        (f for f in os.listdir(runs_dir) if f.startswith(args.model) and f.endswith(".json")),
-        reverse=True,
-    )
-    if candidates:
-        print(f"  Saved to    : {os.path.join(runs_dir, candidates[0])}")
+    if result.get("saved_path"):
+        print(f"  Saved to    : {result['saved_path']}")
 
 
 if __name__ == "__main__":
