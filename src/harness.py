@@ -21,6 +21,7 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field
 
 from src.audio_engine import AudioEngine
+from src.jev_client import JevClient, JevClientError
 
 BUDGET_SEC: float = 60.0
 
@@ -100,17 +101,25 @@ class SessionResult(BaseModel):
     total_elapsed_sec: float
     termination_reason: str
     final_features: dict[str, Any] | None = Field(default=None)
+    jev_response: dict[str, Any] | None = Field(default=None)
     trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AcousticHarness:
     """Orchestrate a bounded 60-second acoustic exploration session for one LLM."""
 
-    def __init__(self, model_name: str, runs_dir: str = "runs", budget_sec: float = BUDGET_SEC) -> None:
+    def __init__(
+        self,
+        model_name: str,
+        runs_dir: str = "runs",
+        budget_sec: float = BUDGET_SEC,
+        jev_client: JevClient | None = None,
+    ) -> None:
         self.model_name = model_name
         self.runs_dir = runs_dir
         self.budget_sec = budget_sec
         self.audio = AudioEngine()
+        self.jev_client = jev_client or JevClient()
         os.makedirs(self.runs_dir, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -140,6 +149,7 @@ class AcousticHarness:
         trace: list[dict[str, Any]] = []
 
         final_features: dict | None = None
+        jev_response: dict[str, Any] | None = None
         termination_reason = "in_progress"
 
         while True:
@@ -176,8 +186,21 @@ class AcousticHarness:
                     # Terminal tool – record a synthetic tool result to keep history consistent,
                     # then end the session immediately.
                     final_features = tool_args.get("features", {})
-                    termination_reason = "completed"
-                    submit_result = {"status": "accepted", "elapsed_sec": round(time.monotonic() - t_start, 2)}
+                    try:
+                        jev_response = self.submit_jev_features(final_features)
+                        termination_reason = "completed"
+                        submit_result = {
+                            "status": "accepted",
+                            "jev_response": jev_response,
+                            "elapsed_sec": round(time.monotonic() - t_start, 2),
+                        }
+                    except JevClientError as exc:
+                        termination_reason = "jev_error"
+                        submit_result = {
+                            "status": "error",
+                            "error": str(exc),
+                            "elapsed_sec": round(time.monotonic() - t_start, 2),
+                        }
                     trace.append({
                         "tool": tool_name,
                         "args": tool_args,
@@ -242,6 +265,7 @@ class AcousticHarness:
             total_elapsed_sec=total_elapsed,
             termination_reason=termination_reason,
             final_features=final_features,
+            jev_response=jev_response,
             trace=trace,
         )
 
@@ -257,3 +281,7 @@ class AcousticHarness:
         filepath = os.path.join(self.runs_dir, filename)
         with open(filepath, "w", encoding="utf-8") as fh:
             json.dump(result.model_dump(), fh, indent=2, ensure_ascii=False)
+
+    def submit_jev_features(self, features: dict[str, Any]) -> dict[str, Any]:
+        """Submit the final acoustic feature vector to the Jev API."""
+        return self.jev_client.submit_features(features)
